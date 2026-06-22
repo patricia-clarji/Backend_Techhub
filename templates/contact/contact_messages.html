@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Contact Messages | TechHub{% endblock %}
+{% block content %}
+<p class="text-accent fw-semibold mb-1">Support inbox</p><h1 class="h2 mb-4">Contact messages</h1>
+<div class="row g-3">{% for message in contact_messages %}<div class="col-12"><div class="card p-4"><div class="d-flex flex-column flex-md-row justify-content-between gap-2"><div><h2 class="h5 mb-1">{{ message.subject|default:"No subject" }}</h2><p class="text-muted small">{{ message.name }} · <a href="mailto:{{ message.email }}">{{ message.email }}</a></p></div><div><span class="badge {% if message.is_resolved %}text-bg-success{% else %}text-bg-warning{% endif %}">{% if message.is_resolved %}Resolved{% else %}Open{% endif %}</span><small class="text-muted ms-2">{{ message.created_at|date:"M j, Y" }}</small></div></div><p class="mb-0">{{ message.message|linebreaksbr }}</p></div></div>{% empty %}<div class="col-12"><div class="card p-5 text-center text-muted">No contact messages.</div></div>{% endfor %}</div>
+{% endblock %}

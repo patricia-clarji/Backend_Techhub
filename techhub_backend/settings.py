@@ -14,6 +14,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -26,6 +28,18 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-local-development-o
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
+
+if not DEBUG and (
+    SECRET_KEY in {
+        'django-insecure-local-development-only',
+        'replace-me-in-production',
+    }
+    or len(SECRET_KEY) < 50
+):
+    raise ImproperlyConfigured(
+        'DJANGO_SECRET_KEY must be a long, non-placeholder value when '
+        'DJANGO_DEBUG is false.'
+    )
 
 ALLOWED_HOSTS = [host.strip() for host in os.getenv(
     'DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1'
@@ -63,7 +77,7 @@ ROOT_URLCONF = 'techhub_backend.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -128,6 +142,10 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+LOGIN_URL = 'preview-login'
+LOGIN_REDIRECT_URL = 'preview-dashboard'
+LOGOUT_REDIRECT_URL = 'preview-home'
+
 CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv(
         'CORS_ALLOWED_ORIGINS',
@@ -141,7 +159,7 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 24,

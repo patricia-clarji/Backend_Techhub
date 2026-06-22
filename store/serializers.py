@@ -1,7 +1,10 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db.models import Avg
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
+from django.db.models import Avg, Q
 from rest_framework import serializers
 
 from .models import (
@@ -45,7 +48,7 @@ class ProductSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', format='%Y-%m-%d')
     averageRating = serializers.SerializerMethodField()
     rating = serializers.SerializerMethodField()
-    reviews = ReviewSerializer(many=True, read_only=True)
+    reviews = serializers.SerializerMethodField()
     variants = ProductVariantSerializer(many=True, read_only=True)
     price = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
     discountPercent = serializers.IntegerField(source='discount_percent', read_only=True)
@@ -68,6 +71,12 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_rating(self, obj):
         return self.get_averageRating(obj)
+
+    def get_reviews(self, obj):
+        reviews = getattr(obj, 'approved_reviews', None)
+        if reviews is None:
+            reviews = obj.reviews.filter(is_approved=True).select_related('user')
+        return ReviewSerializer(reviews, many=True).data
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -131,8 +140,18 @@ class UserSerializer(serializers.ModelSerializer):
         return obj.get_full_name() or obj.username
 
     def _profile(self, obj):
-        profile, _ = CustomerProfile.objects.get_or_create(user=obj)
-        return ProfileSerializer(profile).data
+        cache = getattr(self, '_profile_cache', {})
+        cache_key = obj.pk if obj.pk is not None else id(obj)
+        if cache_key in cache:
+            return cache[cache_key]
+        try:
+            profile = obj.customer_profile
+        except CustomerProfile.DoesNotExist:
+            profile = CustomerProfile(user=obj)
+        data = ProfileSerializer(profile).data
+        cache[cache_key] = data
+        self._profile_cache = cache
+        return data
 
     def get_preferences(self, obj):
         return self._profile(obj)['preferences']
@@ -151,10 +170,20 @@ class SignupSerializer(serializers.Serializer):
 
     def validate_email(self, value):
         value = value.lower().strip()
-        if User.objects.filter(email__iexact=value).exists():
+        if User.objects.filter(
+            Q(email__iexact=value) | Q(username__iexact=value)
+        ).exists():
             raise serializers.ValidationError('An account with this email already exists.')
         return value
 
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages)) from exc
+        return value
+
+    @transaction.atomic
     def create(self, validated_data):
         name = validated_data.pop('name').strip()
         email = validated_data.pop('email')
@@ -181,10 +210,77 @@ class ProfileUpdateSerializer(serializers.Serializer):
 
     def validate_email(self, value):
         user = self.context['request'].user
-        if User.objects.exclude(pk=user.pk).filter(email__iexact=value).exists():
+        if User.objects.exclude(pk=user.pk).filter(
+            Q(email__iexact=value) | Q(username__iexact=value)
+        ).exists():
             raise serializers.ValidationError('This email is already in use.')
         return value.lower().strip()
 
+    def validate_preferences(self, value):
+        language = value.get('language')
+        currency = value.get('currency')
+        if language is not None and (
+            not isinstance(language, str) or len(language) > 30
+        ):
+            raise serializers.ValidationError(
+                {'language': 'Must be a string of 30 characters or fewer.'}
+            )
+        if currency is not None and (
+            not isinstance(currency, str) or len(currency) > 8
+        ):
+            raise serializers.ValidationError(
+                {'currency': 'Must be a string of 8 characters or fewer.'}
+            )
+        if 'notifications' in value:
+            value['notifications'] = self._validate_notifications(
+                value['notifications']
+            )
+        return value
+
+    def validate_notifications(self, value):
+        return self._validate_notifications(value)
+
+    def _validate_notifications(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Expected an object.')
+        validated = dict(value)
+        for field in ('orders', 'promotions', 'alerts'):
+            if field in validated:
+                validated[field] = serializers.BooleanField().run_validation(
+                    validated[field]
+                )
+        return validated
+
+    def validate_billing(self, value):
+        limits = {
+            'cardName': 200,
+            'address': None,
+            'expiry': 5,
+        }
+        validated = dict(value)
+        for field, max_length in limits.items():
+            if field not in validated:
+                continue
+            field_value = validated[field]
+            if not isinstance(field_value, str):
+                raise serializers.ValidationError(
+                    {field: 'Must be a string.'}
+                )
+            if max_length and len(field_value) > max_length:
+                raise serializers.ValidationError(
+                    {field: f'Must be {max_length} characters or fewer.'}
+                )
+
+        if 'cardNumber' in validated:
+            raw_number = str(validated['cardNumber'])
+            number = ''.join(filter(str.isdigit, raw_number))
+            if number and '*' not in raw_number and not 12 <= len(number) <= 19:
+                raise serializers.ValidationError(
+                    {'cardNumber': 'Card number is invalid.'}
+                )
+        return validated
+
+    @transaction.atomic
     def update(self, user, validated_data):
         profile, _ = CustomerProfile.objects.get_or_create(user=user)
         if 'name' in validated_data:
@@ -216,21 +312,24 @@ class ProfileUpdateSerializer(serializers.Serializer):
         }
         for source, target in mapping.items():
             if source in notifications:
-                setattr(profile, target, bool(notifications[source]))
+                setattr(profile, target, notifications[source])
 
         billing = validated_data.get('billing', {})
         if billing:
             profile.billing_name = billing.get('cardName', profile.billing_name)
             profile.billing_address = billing.get('address', profile.billing_address)
             profile.card_expiry = billing.get('expiry', profile.card_expiry)
-            number = ''.join(filter(str.isdigit, billing.get('cardNumber', '')))
+            raw_number = str(billing.get('cardNumber', ''))
+            number = ''.join(filter(str.isdigit, raw_number))
             if number:
-                if len(number) < 12:
+                is_existing_mask = '*' in raw_number and number == profile.card_last4
+                if not is_existing_mask and len(number) < 12:
                     raise serializers.ValidationError(
                         {'billing': 'Card number is invalid.'}
                     )
-                profile.card_last4 = number[-4:]
-                profile.card_brand = detect_card_brand(number)
+                if not is_existing_mask:
+                    profile.card_last4 = number[-4:]
+                    profile.card_brand = detect_card_brand(number)
         profile.save()
         return user
 
@@ -315,14 +414,21 @@ class CartSerializer(serializers.ModelSerializer):
         model = Cart
         fields = ('items', 'subtotal', 'discountTotal', 'totalAmount', 'itemCount')
 
+    def _totals(self, obj):
+        if not hasattr(self, '_totals_cache'):
+            self._totals_cache = {}
+        if obj.pk not in self._totals_cache:
+            self._totals_cache[obj.pk] = cart_totals(obj)
+        return self._totals_cache[obj.pk]
+
     def get_subtotal(self, obj):
-        return float(cart_totals(obj)[0])
+        return float(self._totals(obj)[0])
 
     def get_discountTotal(self, obj):
-        return float(cart_totals(obj)[1])
+        return float(self._totals(obj)[1])
 
     def get_totalAmount(self, obj):
-        return float(cart_totals(obj)[2])
+        return float(self._totals(obj)[2])
 
     def get_itemCount(self, obj):
         return sum(item.quantity for item in obj.items.all())

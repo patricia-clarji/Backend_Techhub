@@ -89,6 +89,9 @@ class Review(TimeStampedModel):
             )
         ]
 
+    def __str__(self):
+        return f'{self.product.name} review by {self.user}'
+
 
 class CustomerProfile(TimeStampedModel):
     user = models.OneToOneField(
@@ -108,11 +111,17 @@ class CustomerProfile(TimeStampedModel):
     card_last4 = models.CharField(max_length=4, blank=True)
     card_expiry = models.CharField(max_length=5, blank=True)
 
+    def __str__(self):
+        return f'Profile for {self.user}'
+
 
 class Cart(TimeStampedModel):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, related_name='cart', on_delete=models.CASCADE
     )
+
+    def __str__(self):
+        return f'Cart for {self.user}'
 
 
 class CartItem(TimeStampedModel):
@@ -130,6 +139,9 @@ class CartItem(TimeStampedModel):
             )
         ]
 
+    def __str__(self):
+        return f'{self.quantity} x {self.product.name}'
+
 
 class WishlistItem(TimeStampedModel):
     user = models.ForeignKey(
@@ -144,6 +156,9 @@ class WishlistItem(TimeStampedModel):
                 fields=('user', 'product'), name='unique_wishlist_product'
             )
         ]
+
+    def __str__(self):
+        return f'{self.product.name} saved by {self.user}'
 
 
 class RecentlyViewed(TimeStampedModel):
@@ -160,6 +175,9 @@ class RecentlyViewed(TimeStampedModel):
             )
         ]
         ordering = ('-updated_at',)
+
+    def __str__(self):
+        return f'{self.product.name} viewed by {self.user}'
 
 
 class Order(TimeStampedModel):
@@ -197,6 +215,9 @@ class Order(TimeStampedModel):
             self.number = f'TH-{uuid.uuid4().hex[:10].upper()}'
         super().save(*args, **kwargs)
 
+    def __str__(self):
+        return self.number
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
@@ -207,6 +228,9 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    def __str__(self):
+        return f'{self.quantity} x {self.product_name}'
 
 
 class Notification(TimeStampedModel):
@@ -221,6 +245,9 @@ class Notification(TimeStampedModel):
     class Meta:
         ordering = ('-created_at',)
 
+    def __str__(self):
+        return f'{self.kind}: {self.message[:50]}'
+
 
 class ContactMessage(TimeStampedModel):
     name = models.CharField(max_length=200)
@@ -231,3 +258,6 @@ class ContactMessage(TimeStampedModel):
 
     class Meta:
         ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.subject} - {self.email}'

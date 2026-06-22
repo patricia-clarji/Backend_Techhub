@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ order.number }} | TechHub{% endblock %}
+{% block content %}
+<a class="text-decoration-none" href="{% url 'preview-order-list' %}">&larr; Back to orders</a>
+<div class="card p-4 p-lg-5 mt-3">
+    <div class="d-flex flex-column flex-md-row justify-content-between gap-3"><div><p class="text-accent fw-semibold mb-1">Order</p><h1 class="h2">{{ order.number|default:order.pk }}</h1><p class="text-muted mb-0">{{ order.created_at|date:"M j, Y H:i" }}</p></div><div><span class="badge badge-soft fs-6">{{ order.get_status_display|default:order.status }}</span><p class="display-6 fw-bold mt-2 mb-0">${{ order.total }}</p></div></div>
+    <hr class="my-4">
+    <div class="row"><div class="col-md-6"><h2 class="h6">Customer</h2><p>{{ order.full_name|default:order.user }}<br>{{ order.email|default:"No email" }}</p></div><div class="col-md-6"><h2 class="h6">Shipping address</h2><p>{{ order.shipping_address|linebreaksbr|default:"Not available" }}</p></div></div>
+    <h2 class="h5 mt-3">Order items</h2><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Product</th><th>Variant</th><th>Quantity</th><th>Unit price</th><th>Total</th></tr></thead><tbody>
+    {% for item in order.items.all %}<tr><td>{{ item.product_name|default:item.product }}</td><td>{{ item.variant_name|default:"—" }}</td><td>{{ item.quantity }}</td><td>${{ item.unit_price }}</td><td>${{ item.line_total }}</td></tr>{% empty %}<tr><td colspan="5" class="text-muted">No order items.</td></tr>{% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

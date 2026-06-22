@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }} | TechHub{% endblock %}
+{% block content %}
+<a class="text-decoration-none" href="{% url 'preview-product-list' %}">&larr; Back to products</a>
+<div class="card mt-3 overflow-hidden">
+    <div class="row g-0">
+        <div class="col-lg-5">{% if product.primary_image %}<img class="w-100 h-100" style="object-fit:cover;min-height:360px" src="{{ product.primary_image }}" alt="{{ product.name }}">{% else %}<div class="h-100 d-flex align-items-center justify-content-center bg-light text-muted">No image</div>{% endif %}</div>
+        <div class="col-lg-7 p-4 p-lg-5">
+            <div class="d-flex gap-2 mb-3"><span class="badge badge-soft">{{ product.category|default:"Uncategorized" }}</span>{% if product.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}{% if product.is_featured %}<span class="badge text-bg-dark">Featured</span>{% endif %}</div>
+            <h1>{{ product.name|default:"Unnamed product" }}</h1>
+            <p class="text-muted">{{ product.brand|default:"No brand" }} · {{ product.slug }}</p>
+            <p class="display-6 fw-bold">${{ product.price|default:"0.00" }}</p>
+            {% if product.is_on_sale %}<p class="text-danger fw-semibold">On sale: {{ product.discount_percent|default:0 }}% off</p>{% endif %}
+            <p>{{ product.description|default:"No description available." }}</p>
+            <dl class="row mb-0"><dt class="col-sm-4">Stock</dt><dd class="col-sm-8">{{ product.stock|default:0 }}</dd><dt class="col-sm-4">Created</dt><dd class="col-sm-8">{{ product.created_at|date:"M j, Y H:i" }}</dd><dt class="col-sm-4">Updated</dt><dd class="col-sm-8">{{ product.updated_at|date:"M j, Y H:i" }}</dd></dl>
+        </div>
+    </div>
+</div>
+<div class="row g-4 mt-1">
+    <div class="col-lg-6"><div class="card p-4 h-100"><h2 class="h5">Features</h2><ul class="mb-0">{% for feature in product.features %}<li>{{ feature }}</li>{% empty %}<li class="text-muted">No features recorded.</li>{% endfor %}</ul></div></div>
+    <div class="col-lg-6"><div class="card p-4 h-100"><h2 class="h5">Colors</h2><div class="d-flex flex-wrap gap-2">{% for color in product.colors %}<span class="badge text-bg-light">{{ color }}</span>{% empty %}<span class="text-muted">No colors recorded.</span>{% endfor %}</div></div></div>
+    <div class="col-lg-6"><div class="card p-4 h-100"><h2 class="h5">Specifications</h2><dl class="row mb-0">{% for key, value in product.specifications.items %}<dt class="col-5">{{ key }}</dt><dd class="col-7">{{ value }}</dd>{% empty %}<dd class="text-muted">No specifications recorded.</dd>{% endfor %}</dl></div></div>
+    <div class="col-lg-6"><div class="card p-4 h-100"><h2 class="h5">Gallery URLs</h2><ul class="small mb-0">{% for image in product.images %}<li class="text-break"><a href="{{ image }}" target="_blank" rel="noopener">{{ image }}</a></li>{% empty %}<li class="text-muted">No gallery images recorded.</li>{% endfor %}</ul></div></div>
+</div>
+{% endblock %}

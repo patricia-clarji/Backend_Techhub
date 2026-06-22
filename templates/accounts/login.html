@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Login | TechHub{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-7 col-lg-5"><div class="card p-4 p-lg-5"><p class="text-accent fw-semibold mb-1">Browser preview</p><h1 class="h3 mb-4">Sign in</h1><form method="post">{% csrf_token %}{{ form.as_p }}{% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}<button class="btn btn-primary w-100" type="submit">Login</button></form><p class="text-center text-muted mt-4 mb-0">Need an account? <a href="{% url 'preview-register' %}">Register</a></p></div></div></div>
+{% endblock %}

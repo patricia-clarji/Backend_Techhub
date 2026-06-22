@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}TechHub Backend Preview{% endblock %}
+{% block content %}
+<section class="hero p-4 p-md-5">
+    <div class="row align-items-center g-4">
+        <div class="col-lg-8">
+            <span class="badge rounded-pill text-bg-light mb-3">Backend preview environment</span>
+            <h1 class="display-4 fw-bold">TechHub Backend</h1>
+            <p class="lead text-white-50">Django backend management preview for inspecting catalog and commerce data in a clean browser interface.</p>
+            <div class="d-flex flex-wrap gap-3 mt-4">
+                <a class="btn btn-primary btn-lg" href="{% url 'preview-dashboard' %}">Open Dashboard</a>
+                <a class="btn btn-outline-light btn-lg" href="{% url 'preview-product-list' %}">Browse Products</a>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card bg-white bg-opacity-10 text-white p-4">
+                <h2 class="h5">Preview only</h2>
+                <p class="mb-0 text-white-50">This interface is separate from the final storefront and does not replace the existing REST API.</p>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

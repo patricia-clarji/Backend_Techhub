@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Add Product | TechHub{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-xl-9"><div class="card p-4 p-lg-5"><p class="text-accent fw-semibold mb-1">Manual backend testing</p><h1 class="h2 mb-4">Create product</h1><form method="post">{% csrf_token %}{{ form.as_p }}<div class="d-flex gap-2"><button class="btn btn-primary" type="submit">Save product</button><a class="btn btn-outline-secondary" href="{% url 'preview-product-list' %}">Cancel</a></div></form></div></div></div>
+{% endblock %}

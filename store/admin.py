@@ -57,9 +57,44 @@ class ContactMessageAdmin(admin.ModelAdmin):
     search_fields = ('name', 'email', 'subject', 'message')
 
 
-admin.site.register(CustomerProfile)
-admin.site.register(Cart)
-admin.site.register(CartItem)
-admin.site.register(WishlistItem)
-admin.site.register(RecentlyViewed)
-admin.site.register(Notification)
+@admin.register(CustomerProfile)
+class CustomerProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'phone', 'language', 'currency', 'updated_at')
+    search_fields = ('user__username', 'user__email', 'phone')
+    list_select_related = ('user',)
+
+
+@admin.register(Cart)
+class CartAdmin(admin.ModelAdmin):
+    list_display = ('user', 'created_at', 'updated_at')
+    search_fields = ('user__username', 'user__email')
+    list_select_related = ('user',)
+
+
+@admin.register(CartItem)
+class CartItemAdmin(admin.ModelAdmin):
+    list_display = ('cart', 'product', 'variant', 'quantity', 'updated_at')
+    search_fields = ('cart__user__email', 'product__name', 'variant__name')
+    list_select_related = ('cart__user', 'product', 'variant')
+
+
+@admin.register(WishlistItem)
+class WishlistItemAdmin(admin.ModelAdmin):
+    list_display = ('user', 'product', 'created_at')
+    search_fields = ('user__email', 'product__name')
+    list_select_related = ('user', 'product')
+
+
+@admin.register(RecentlyViewed)
+class RecentlyViewedAdmin(admin.ModelAdmin):
+    list_display = ('user', 'product', 'updated_at')
+    search_fields = ('user__email', 'product__name')
+    list_select_related = ('user', 'product')
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('user', 'kind', 'message', 'is_read', 'created_at')
+    list_filter = ('kind', 'is_read', 'created_at')
+    search_fields = ('user__email', 'message')
+    list_select_related = ('user',)

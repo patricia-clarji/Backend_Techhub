@@ -1,20 +1,24 @@
 import json
 import urllib.error
 import urllib.request
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
-from django.db import transaction
-from django.db.models import Avg, Q
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
@@ -36,6 +40,23 @@ def token_payload(user):
         'refresh': str(refresh),
         'user': UserSerializer(user).data,
     }
+
+
+def approved_reviews_prefetch(lookup='reviews'):
+    return Prefetch(
+        lookup,
+        queryset=Review.objects.filter(is_approved=True).select_related('user'),
+        to_attr='approved_reviews',
+    )
+
+
+def get_user_cart(user):
+    cart, _ = Cart.objects.get_or_create(user=user)
+    return Cart.objects.prefetch_related(
+        approved_reviews_prefetch('items__product__reviews'),
+        'items__product__variants',
+        'items__variant',
+    ).get(pk=cart.pk)
 
 
 class HealthView(APIView):
@@ -79,11 +100,24 @@ class LogoutView(APIView):
 
     def post(self, request):
         token = request.data.get('refresh')
-        if token:
-            try:
-                RefreshToken(token).blacklist()
-            except Exception:
-                pass
+        if not token:
+            return Response(
+                {'refresh': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            refresh = RefreshToken(token)
+            if str(refresh['user_id']) != str(request.user.pk):
+                return Response(
+                    {'refresh': ['This token does not belong to the current user.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            refresh.blacklist()
+        except TokenError:
+            return Response(
+                {'refresh': ['Invalid or expired token.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -118,9 +152,11 @@ class ChangePasswordView(APIView):
                 {'currentPassword': ['Incorrect current password.']},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if len(new) < 8:
+        try:
+            validate_password(new, user=request.user)
+        except DjangoValidationError as exc:
             return Response(
-                {'newPassword': ['Password must be at least 8 characters.']},
+                {'newPassword': list(exc.messages)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         request.user.set_password(new)
@@ -135,7 +171,7 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = Product.objects.filter(is_active=True).prefetch_related(
-            'variants', 'reviews__user'
+            'variants', approved_reviews_prefetch()
         ).annotate(average_rating=Avg(
             'reviews__rating', filter=Q(reviews__is_approved=True)
         ))
@@ -153,10 +189,20 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
         if params.get('brand'):
             brands = [item.strip() for item in params.getlist('brand') if item.strip()]
             queryset = queryset.filter(brand__in=brands)
-        if params.get('min_price'):
-            queryset = queryset.filter(price__gte=params['min_price'])
-        if params.get('max_price'):
-            queryset = queryset.filter(price__lte=params['max_price'])
+        for param, lookup in (('min_price', 'price__gte'), ('max_price', 'price__lte')):
+            raw_value = params.get(param)
+            if raw_value:
+                try:
+                    value = Decimal(raw_value)
+                except InvalidOperation as exc:
+                    raise ValidationError(
+                        {param: ['Enter a valid price.']}
+                    ) from exc
+                if value < 0:
+                    raise ValidationError(
+                        {param: ['Price cannot be negative.']}
+                    )
+                queryset = queryset.filter(**{lookup: value})
         if params.get('in_stock', '').lower() == 'true':
             queryset = queryset.filter(stock__gt=0)
         ordering = {
@@ -193,7 +239,14 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
             )
         serializer = ReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        review = serializer.save(product=product, user=request.user)
+        try:
+            with transaction.atomic():
+                review = serializer.save(product=product, user=request.user)
+        except IntegrityError:
+            return Response(
+                {'detail': 'You have already reviewed this product.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
 
     @action(
@@ -218,11 +271,7 @@ class CartView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get_cart(self, user):
-        cart, _ = Cart.objects.get_or_create(user=user)
-        return Cart.objects.prefetch_related(
-            'items__product__reviews__user', 'items__product__variants',
-            'items__variant',
-        ).get(pk=cart.pk)
+        return get_user_cart(user)
 
     def get(self, request):
         return Response(CartSerializer(self.get_cart(request.user)).data)
@@ -279,7 +328,7 @@ class CartItemView(APIView):
             )
         item.quantity = quantity
         item.save(update_fields=('quantity', 'updated_at'))
-        return Response(CartSerializer(item.cart).data)
+        return Response(CartSerializer(get_user_cart(request.user)).data)
 
     def delete(self, request, pk):
         item = get_object_or_404(CartItem, pk=pk, cart__user=request.user)
@@ -293,7 +342,7 @@ class WishlistView(APIView):
     def get(self, request):
         products = Product.objects.filter(
             wishlistitem__user=request.user, is_active=True
-        ).prefetch_related('variants', 'reviews__user')
+        ).prefetch_related('variants', approved_reviews_prefetch())
         return Response(ProductSerializer(products, many=True).data)
 
     def post(self, request):
@@ -319,7 +368,12 @@ class RecentlyViewedView(APIView):
         product_ids = RecentlyViewed.objects.filter(user=request.user).values_list(
             'product_id', flat=True
         )[:8]
-        products = {p.pk: p for p in Product.objects.filter(pk__in=product_ids)}
+        products = {
+            product.pk: product
+            for product in Product.objects.filter(
+                pk__in=product_ids, is_active=True
+            ).prefetch_related('variants', approved_reviews_prefetch())
+        }
         ordered = [products[pk] for pk in product_ids if pk in products]
         return Response(ProductSerializer(ordered, many=True).data)
 
@@ -347,6 +401,11 @@ class CheckoutView(APIView):
         items = list(cart.items.all())
         for item in items:
             product = Product.objects.select_for_update().get(pk=item.product_id)
+            if not product.is_active:
+                return Response(
+                    {'detail': f'{product.name} is no longer available.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
             variant = None
             if item.variant_id:
                 variant = product.variants.select_for_update().get(pk=item.variant_id)
@@ -460,12 +519,31 @@ class ChatView(APIView):
 
     def post(self, request):
         prompt = str(request.data.get('message', '')).strip()
-        history = request.data.get('history', [])[-6:]
+        history = request.data.get('history', [])
         if not prompt:
             return Response(
                 {'message': ['This field is required.']},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if len(prompt) > 4000:
+            return Response(
+                {'message': ['Must be 4000 characters or fewer.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(history, list):
+            return Response(
+                {'history': ['Expected a list of messages.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        history = [
+            {'role': item['role'], 'content': item['content'][:4000]}
+            for item in history[-6:]
+            if (
+                isinstance(item, dict)
+                and item.get('role') in {'user', 'assistant'}
+                and isinstance(item.get('content'), str)
+            )
+        ]
         products = Product.objects.filter(is_active=True)[:50]
         catalog = '\n'.join(
             f'{p.name} (${p.price}): {p.description}; features: '
