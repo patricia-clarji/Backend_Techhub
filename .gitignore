@@ -5,3 +5,4 @@ __pycache__/
 staticfiles/
 .coverage
 htmlcov/
+.vscode/
